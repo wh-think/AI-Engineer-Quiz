@@ -33,10 +33,10 @@
         <input id="search" placeholder="Search assets, tags, metadata...">
       </div>
       <div class="topbar-right">
-        <button id="btn-upload" class="btn btn-primary">Upload</button>
+        <button id="btn-upload" class="btn btn-primary" type="button">Upload</button>
         <div class="user-menu">
           <span id="user-label" class="muted"></span>
-          <button id="btn-logout" class="btn btn-ghost">Sign out</button>
+          <button id="btn-logout" class="btn btn-ghost" type="button">Sign out</button>
         </div>
       </div>
     </header>
@@ -44,11 +44,11 @@
     <div class="layout">
       <aside class="sidebar">
         <nav class="nav">
-          <button class="nav-item active" data-view="library">Library</button>
-          <button class="nav-item" data-view="collections">Collections</button>
-          <button class="nav-item admin-only" data-view="dashboard">Dashboard</button>
-          <button class="nav-item admin-only" data-view="users">Users</button>
-          <button class="nav-item admin-only" data-view="audit">Audit log</button>
+          <button class="nav-item active" data-view="library" type="button">Library</button>
+          <button class="nav-item" data-view="collections" type="button">Collections</button>
+          <button class="nav-item admin-only" data-view="dashboard" type="button">Dashboard</button>
+          <button class="nav-item admin-only" data-view="users" type="button">Users</button>
+          <button class="nav-item admin-only" data-view="audit" type="button">Audit log</button>
         </nav>
 
         <div id="facets" class="facets">
@@ -123,7 +123,7 @@
         <div id="view-collections" class="view hidden">
           <div class="view-head">
             <h2>Collections</h2>
-            <button id="btn-new-collection" class="btn">New collection</button>
+            <button id="btn-new-collection" class="btn" type="button">New collection</button>
           </div>
           <div id="collection-list" class="collection-list"></div>
         </div>
@@ -134,13 +134,13 @@
           <div class="panel">
             <h3>Integrity</h3>
             <p class="muted">Re-hash every stored blob against its recorded SHA-256 (digital preservation fixity check).</p>
-            <button id="btn-fixity" class="btn">Run fixity check</button>
+            <button id="btn-fixity" class="btn" type="button">Run fixity check</button>
             <div id="fixity-result" class="muted"></div>
           </div>
         </div>
 
         <div id="view-users" class="view hidden">
-          <div class="view-head"><h2>Users</h2><button id="btn-new-user" class="btn">Add user</button></div>
+          <div class="view-head"><h2>Users</h2><button id="btn-new-user" class="btn" type="button">Add user</button></div>
           <table class="table"><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Active</th><th>Last login</th></tr></thead>
             <tbody id="user-rows"></tbody></table>
         </div>
@@ -158,7 +158,7 @@
   <div id="drawer" class="drawer hidden">
     <div class="drawer-backdrop"></div>
     <div class="drawer-panel">
-      <button id="drawer-close" class="drawer-close">&times;</button>
+      <button id="drawer-close" class="drawer-close" type="button">&times;</button>
       <div id="drawer-body"></div>
     </div>
   </div>
@@ -175,7 +175,7 @@
       <label class="check"><input type="checkbox" id="ai-toggle" checked> Run AI enrichment (tags, alt-text)</label>
       <div id="upload-list" class="upload-list"></div>
       <div class="modal-actions">
-        <button id="upload-cancel" class="btn btn-ghost">Close</button>
+        <button id="upload-cancel" class="btn btn-ghost" type="button">Close</button>
       </div>
     </div>
   </div>

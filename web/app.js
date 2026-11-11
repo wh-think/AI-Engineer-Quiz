@@ -8,10 +8,16 @@ const state = { token: localStorage.getItem("keepstack_token"), user: null,
 
 // ---------- API helper ----------
 async function api(path, opts = {}) {
-  const headers = opts.headers || {};
+  const request = { ...opts };
+  const headers = { ...(opts.headers || {}) };
   if (state.token) headers["Authorization"] = "Bearer " + state.token;
-  if (opts.json) { headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(opts.json); }
-  const res = await fetch(path, { ...opts, headers });
+  if (opts.json) {
+    headers["Content-Type"] = "application/json";
+    request.method ??= "POST";
+    request.body = JSON.stringify(opts.json);
+  }
+  delete request.json;
+  const res = await fetch(path, { ...request, headers });
   if (res.status === 401) { logout(); throw new Error("unauthorised"); }
   if (!res.ok) { const t = await res.text(); throw new Error(t || res.statusText); }
   return res.headers.get("content-type")?.includes("json") ? res.json() : res;
@@ -31,7 +37,10 @@ $("#login-form").addEventListener("submit", async (e) => {
     const r = await api("/api/auth/login", { json: { username: $("#login-user").value, password: $("#login-pass").value } });
     state.token = r.token; localStorage.setItem("keepstack_token", r.token);
     state.user = r.user; enterApp();
-  } catch { $("#login-error").textContent = "Invalid credentials"; $("#login-error").classList.remove("hidden"); }
+  } catch (err) {
+    $("#login-error").textContent = err.message || "Unable to sign in";
+    $("#login-error").classList.remove("hidden");
+  }
 });
 $("#btn-logout").addEventListener("click", logout);
 function logout() { localStorage.removeItem("keepstack_token"); state.token = null; state.user = null;

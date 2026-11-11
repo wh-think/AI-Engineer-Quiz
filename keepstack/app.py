@@ -201,6 +201,21 @@ def list_assets(
     )
 
 
+@app.get("/api/filter-options")
+def filter_options(user: dict = Depends(require_user)):
+    """Choices for the library filter panel, alphabetized for predictable UI."""
+    conn = get_conn()
+    collections = [dict(r) for r in conn.execute(
+        "SELECT id, name FROM collections ORDER BY name, id"
+    )]
+    tags = [r["name"] for r in conn.execute("SELECT name FROM tags ORDER BY name")]
+    media_types = [r["media_type"] for r in conn.execute(
+        "SELECT DISTINCT media_type FROM assets WHERE status = 'active' "
+        "AND media_type IS NOT NULL ORDER BY media_type"
+    )]
+    return {"collections": collections, "tags": tags, "media_types": media_types}
+
+
 @app.get("/api/assets/export.csv")
 def export_assets_csv(
     q: str = "",

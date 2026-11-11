@@ -563,6 +563,21 @@ def test_quiz_export_empty_headers_and_auth(quiz_catalog):
         "uuid,title,description,filename,media_type,tags,created_at"
 
 
+def test_quiz_filter_options_require_auth_and_include_active_types(quiz_catalog):
+    from fastapi.testclient import TestClient
+    from keepstack.app import app
+
+    client = TestClient(app)
+    assert client.get("/api/filter-options").status_code == 401
+    token = make_token(quiz_catalog["admin"]["id"], quiz_catalog["admin"]["role"])
+    response = client.get("/api/filter-options", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert {collection["name"] for collection in payload["collections"]} == {"Harbor Campaign", "Other"}
+    assert "approved" in payload["tags"] and "internal" in payload["tags"]
+    assert "image" in payload["media_types"] and "document" in payload["media_types"]
+
+
 def test_quiz_http_rejects_invalid_pagination_and_status_override(quiz_catalog):
     from fastapi.testclient import TestClient
     from keepstack.app import app

@@ -31,10 +31,6 @@
       </div>
       <div class="search-box">
         <input id="search" placeholder="Search assets, tags, metadata...">
-        <select id="search-mode" title="Search mode">
-          <option value="keyword">Keyword</option>
-          <option value="semantic">Semantic</option>
-        </select>
       </div>
       <div class="topbar-right">
         <button id="btn-upload" class="btn btn-primary">Upload</button>
@@ -72,17 +68,56 @@
           <div class="view-head">
             <h2 id="result-title">Library</h2>
             <div class="view-controls">
-              <span id="active-filter" class="chip hidden"></span>
               <select id="sort">
                 <option value="newest">Newest</option>
                 <option value="oldest">Oldest</option>
-                <option value="name">Name</option>
-                <option value="largest">Largest</option>
               </select>
+              <button id="btn-export" class="btn" type="button">Export CSV</button>
             </div>
           </div>
+
+          <section id="filter-panel" class="filter-panel" aria-label="Asset filters">
+            <div class="filter-grid">
+              <label class="filter-field">Collection
+                <select id="filter-collection">
+                  <option value="">All collections</option>
+                </select>
+              </label>
+              <label class="filter-field">Media type
+                <select id="filter-media">
+                  <option value="">All media types</option>
+                </select>
+              </label>
+              <label class="filter-field">Include tags
+                <span class="tag-input-wrap">
+                  <input id="filter-include" list="tag-suggestions" placeholder="approved, campaign">
+                  <datalist id="tag-suggestions"></datalist>
+                </span>
+              </label>
+              <label class="filter-field">Exclude tags
+                <span class="tag-input-wrap">
+                  <input id="filter-exclude" list="tag-suggestions" placeholder="internal">
+                </span>
+              </label>
+            </div>
+            <div id="filter-chips" class="filter-chips"></div>
+            <div class="filter-footer">
+              <span class="muted">Top tag counts describe the whole active library.</span>
+              <button id="btn-clear-filters" class="btn btn-ghost" type="button">Clear all</button>
+            </div>
+          </section>
+          <div id="library-error" class="load-error hidden" role="alert">
+            <span id="library-error-text">Unable to load assets.</span>
+            <button id="btn-retry" class="btn" type="button">Retry</button>
+          </div>
           <div id="grid" class="grid"></div>
-          <div id="empty" class="empty hidden">No assets yet. Click Upload to get started.</div>
+          <div id="empty" class="empty hidden">No matching assets.</div>
+          <nav id="pagination" class="pagination hidden" aria-label="Asset pagination">
+            <button id="btn-prev" class="btn" type="button">Previous</button>
+            <span id="page-label" class="muted"></span>
+            <button id="btn-next" class="btn" type="button">Next</button>
+          </nav>
+          <p id="export-error" class="error export-error hidden" role="alert"></p>
         </div>
 
         <div id="view-collections" class="view hidden">

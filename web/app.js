@@ -1,8 +1,9 @@
 /* Keepstack single-page client. Vanilla JS, no build step. */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const SortOrder = Object.freeze({ NEWEST: "newest", OLDEST: "oldest" });
 const state = { token: localStorage.getItem("keepstack_token"), user: null,
-  q: "", media: null, includeTags: [], excludeTags: [], sort: "newest", collection: null,
+  q: "", media: null, includeTags: [], excludeTags: [], sort: SortOrder.NEWEST, collection: null,
   offset: 0, pageSize: 12, total: 0, loadSeq: 0, controller: null, options: null };
 
 // ---------- API helper ----------
@@ -83,9 +84,9 @@ $("#btn-next").addEventListener("click", () => {
 });
 $("#btn-clear-filters").addEventListener("click", () => {
   state.q = ""; state.collection = null; state.media = null; state.includeTags = [];
-  state.excludeTags = []; state.sort = "newest"; state.offset = 0;
+  state.excludeTags = []; state.sort = SortOrder.NEWEST; state.offset = 0;
   $("#search").value = ""; $("#filter-collection").value = ""; $("#filter-media").value = "";
-  $("#filter-include").value = ""; $("#filter-exclude").value = ""; $("#sort").value = "newest";
+  $("#filter-include").value = ""; $("#filter-exclude").value = ""; $("#sort").value = SortOrder.NEWEST;
   renderFilterChips(); loadLibrary();
 });
 $("#btn-retry").addEventListener("click", loadLibrary);

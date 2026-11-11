@@ -2,17 +2,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Iterable, Optional
 
 from . import ai
 from .db import get_conn
+from .enums import AssetStatus
+
+class SortOrder(str, Enum):
+    NEWEST = "newest"
+    OLDEST = "oldest"
+    NAME = "name"
+    LARGEST = "largest"
 
 
-SORTS = {
-    "newest": "a.created_at DESC, a.id DESC",
-    "oldest": "a.created_at ASC, a.id ASC",
-    "name": "a.title ASC, a.id ASC",
-    "largest": "a.size DESC, a.id DESC",
+class SearchMode(str, Enum):
+    KEYWORD = "keyword"
+    SEMANTIC = "semantic"
+
+
+SORT_SQL = {
+    SortOrder.NEWEST: "a.created_at DESC, a.id DESC",
+    SortOrder.OLDEST: "a.created_at ASC, a.id ASC",
+    SortOrder.NAME: "a.title ASC, a.id ASC",
+    SortOrder.LARGEST: "a.size DESC, a.id DESC",
 }
 
 
@@ -53,7 +66,7 @@ def build_query(
     tags: Optional[Iterable[str]] = None,
     exclude_tags: Optional[Iterable[str]] = None,
     collection_id: Optional[int] = None,
-    sort: str = "newest",
+    sort: SortOrder = SortOrder.NEWEST,
 ) -> Query:
     """Build the single keyword/filter query used by lists and exports.
 
@@ -63,12 +76,13 @@ def build_query(
     """
     include = normalize_tags(tags)
     exclude = normalize_tags(exclude_tags)
-    where = ["a.status = 'active'"]
+    where = ["a.status = :active_status"]
+    params: dict[str, object] = {"active_status": AssetStatus.ACTIVE.value}
     joins = ""
-    params: dict[str, object] = {}
 
+    order = SORT_SQL[SortOrder(sort)]
     if set(include) & set(exclude):
-        return Query("\nFROM assets a\nWHERE 0", {}, SORTS.get(sort, SORTS["newest"]), True)
+        return Query("\nFROM assets a\nWHERE 0", {}, order, True)
 
     fts = _fts_query(q)
     if fts:
@@ -108,8 +122,7 @@ def build_query(
         params.update({f"exclude_tag_{i}": tag for i, tag in enumerate(exclude)})
 
     sql = f"FROM assets a{joins} WHERE {' AND '.join(where)}"
-    order_sql = SORTS.get(sort, SORTS["newest"])
-    return Query(sql, params, order_sql)
+    return Query(sql, params, order)
 
 
 def search(
@@ -119,14 +132,14 @@ def search(
     tags: Optional[Iterable[str]] = None,
     exclude_tags: Optional[Iterable[str]] = None,
     collection_id: Optional[int] = None,
-    sort: str = "newest",
-    mode: str = "keyword",
+    sort: SortOrder = SortOrder.NEWEST,
+    mode: SearchMode = SearchMode.KEYWORD,
     limit: int = 60,
     offset: int = 0,
 ) -> dict:
     conn = get_conn()
 
-    if mode == "semantic" and q.strip():
+    if SearchMode(mode) is SearchMode.SEMANTIC and q.strip():
         return _semantic_search(q, media_type, limit, offset)
 
     query = build_query(
@@ -143,7 +156,7 @@ def search(
             "total": 0,
             "items": [],
             "facets": _facets(),
-            "mode": "keyword",
+            "mode": SearchMode.KEYWORD.value,
             "limit": limit,
             "offset": offset,
         }
@@ -158,7 +171,7 @@ def search(
         "total": total,
         "items": [_card(dict(r)) for r in rows],
         "facets": _facets(),
-        "mode": "keyword",
+        "mode": SearchMode.KEYWORD.value,
         "limit": limit,
         "offset": offset,
     }
@@ -168,8 +181,8 @@ def _semantic_search(q: str, media_type: Optional[str], limit: int, offset: int)
     """Preserve the existing internal semantic mode for non-quiz callers."""
     conn = get_conn()
     qvec = ai.embed(q)
-    where = ["status = 'active'", "embedding IS NOT NULL"]
-    params: list[object] = []
+    where = ["status = ?", "embedding IS NOT NULL"]
+    params: list[object] = [AssetStatus.ACTIVE.value]
     if media_type:
         where.append("media_type = ?")
         params.append(media_type)
@@ -191,7 +204,7 @@ def _semantic_search(q: str, media_type: Optional[str], limit: int, offset: int)
         "total": len(scored),
         "items": items,
         "facets": _facets(),
-        "mode": "semantic",
+        "mode": SearchMode.SEMANTIC.value,
         "limit": limit,
         "offset": offset,
     }
@@ -204,7 +217,7 @@ def iter_export_rows(
     tags: Optional[Iterable[str]] = None,
     exclude_tags: Optional[Iterable[str]] = None,
     collection_id: Optional[int] = None,
-    sort: str = "newest",
+    sort: SortOrder = SortOrder.NEWEST,
     batch_size: int = 200,
 ):
     """Yield every matching row, with a sorted JSON array of tag names."""
@@ -262,8 +275,8 @@ def more_like(asset_id: int, limit: int = 12) -> list[dict]:
         return []
     bvec = ai.unpack_embedding(base["embedding"])
     rows = conn.execute(
-        "SELECT * FROM assets WHERE id != ? AND status = 'active' AND embedding IS NOT NULL",
-        (asset_id,),
+        "SELECT * FROM assets WHERE id != ? AND status = ? AND embedding IS NOT NULL",
+        (asset_id, AssetStatus.ACTIVE.value),
     ).fetchall()
     scored = [(ai.cosine(bvec, ai.unpack_embedding(r["embedding"])), r) for r in rows]
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -279,14 +292,16 @@ def _facets() -> dict:
     """Global active-catalog facets, not counts for the current match set."""
     conn = get_conn()
     media = conn.execute(
-        "SELECT media_type, COUNT(*) c FROM assets WHERE status = 'active' "
-        "GROUP BY media_type ORDER BY c DESC"
+        "SELECT media_type, COUNT(*) c FROM assets WHERE status = ? "
+        "GROUP BY media_type ORDER BY c DESC",
+        (AssetStatus.ACTIVE.value,),
     ).fetchall()
     tags = conn.execute(
         """SELECT t.name, COUNT(*) c FROM tags t
            JOIN asset_tags at ON at.tag_id = t.id
-           JOIN assets a ON a.id = at.asset_id AND a.status = 'active'
-           GROUP BY t.name ORDER BY c DESC, t.name LIMIT 25"""
+           JOIN assets a ON a.id = at.asset_id AND a.status = ?
+           GROUP BY t.name ORDER BY c DESC, t.name LIMIT 25""",
+        (AssetStatus.ACTIVE.value,),
     ).fetchall()
     return {
         "media_types": [{"value": r["media_type"], "count": r["c"]} for r in media],

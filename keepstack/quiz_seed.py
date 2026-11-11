@@ -10,13 +10,15 @@ from __future__ import annotations
 import io
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Iterable
 
 from PIL import Image
 
 from . import ingest
 from .audit import now_iso
 from .auth import hash_password
-from .db import get_conn, init_db, transaction
+from .db import get_conn, init_db
+from .enums import AssetStatus
 
 
 COLLECTION_UUID = "00000000-0000-4000-8000-00000000a11e"
@@ -65,8 +67,9 @@ def _ensure_collection(conn, admin: dict) -> int:
 
 
 def _asset(conn, admin: dict, collection_id: int, key: str, *, title: str,
-           description: str = "", media_type: str = "image", tags: (),
-           created_at: datetime, status: str = "active") -> dict:
+           description: str = "", media_type: str = "image",
+           tags: Iterable[str] = (), created_at: datetime,
+           status: AssetStatus = AssetStatus.ACTIVE) -> dict:
     filename = f"quiz-{key}.{'txt' if media_type == 'document' else 'jpg'}"
     existing = conn.execute(
         "SELECT * FROM assets WHERE original_filename = ? ORDER BY id LIMIT 1", (filename,)
@@ -76,7 +79,7 @@ def _asset(conn, admin: dict, collection_id: int, key: str, *, title: str,
         conn.execute(
             "UPDATE assets SET title = ?, description = ?, media_type = ?, status = ?, "
             "created_at = ?, updated_at = ? WHERE id = ?",
-            (title, description, media_type, status, created_at.isoformat(), now_iso(), asset["id"]),
+            (title, description, media_type, status.value, created_at.isoformat(), now_iso(), asset["id"]),
         )
     else:
         palette = [
@@ -93,7 +96,7 @@ def _asset(conn, admin: dict, collection_id: int, key: str, *, title: str,
         conn.execute(
             "UPDATE assets SET description = ?, media_type = ?, status = ?, created_at = ?, "
             "updated_at = ? WHERE id = ?",
-            (description, media_type, status, created_at.isoformat(), now_iso(), asset["id"]),
+            (description, media_type, status.value, created_at.isoformat(), now_iso(), asset["id"]),
         )
     conn.execute("DELETE FROM asset_tags WHERE asset_id = ?", (asset["id"],))
     for name in tags:
@@ -154,7 +157,7 @@ def run_quiz_seed() -> None:
         title="Harbor deleted campaign",
         description="Must be excluded because it is not active.",
         tags=("approved", "campaign"), created_at=BASE_TIME + timedelta(hours=3),
-        status="deleted",
+        status=AssetStatus.DELETED,
     )
 
     # A Chinese document verifies media filtering and CSV encoding. Its title

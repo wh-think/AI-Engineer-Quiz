@@ -12,7 +12,7 @@ import ipaddress
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import (Body, Depends, FastAPI, File, Form, HTTPException, Query,
                      Request, UploadFile)
@@ -27,6 +27,7 @@ from .auth import (authenticate, hash_password, login_locked, make_token,
                    verify_password, verify_token)
 from .config import config
 from .db import get_conn, init_db, transaction
+from .enums import AssetStatus
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -182,8 +183,8 @@ def list_assets(
     tag: Optional[list[str]] = Query(None),
     exclude_tag: Optional[list[str]] = Query(None),
     collection_id: Optional[int] = None,
-    sort: Literal["newest", "oldest", "name", "largest"] = "newest",
-    mode: str = "keyword",
+    sort: search.SortOrder = search.SortOrder.NEWEST,
+    mode: search.SearchMode = search.SearchMode.KEYWORD,
     limit: int = Query(60, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: dict = Depends(require_user),
@@ -210,8 +211,9 @@ def filter_options(user: dict = Depends(require_user)):
     )]
     tags = [r["name"] for r in conn.execute("SELECT name FROM tags ORDER BY name")]
     media_types = [r["media_type"] for r in conn.execute(
-        "SELECT DISTINCT media_type FROM assets WHERE status = 'active' "
-        "AND media_type IS NOT NULL ORDER BY media_type"
+        "SELECT DISTINCT media_type FROM assets WHERE status = ? "
+        "AND media_type IS NOT NULL ORDER BY media_type",
+        (AssetStatus.ACTIVE.value,),
     )]
     return {"collections": collections, "tags": tags, "media_types": media_types}
 
@@ -223,7 +225,7 @@ def export_assets_csv(
     tag: Optional[list[str]] = Query(None),
     exclude_tag: Optional[list[str]] = Query(None),
     collection_id: Optional[int] = None,
-    sort: Literal["newest", "oldest", "name", "largest"] = "newest",
+    sort: search.SortOrder = search.SortOrder.NEWEST,
     user: dict = Depends(require_user),
 ):
     fields = ["uuid", "title", "description", "filename", "media_type", "tags", "created_at"]
@@ -315,8 +317,8 @@ def update_asset(uuid: str, request: Request, body: dict = Body(...),
 def delete_asset(uuid: str, request: Request, user: dict = Depends(require_role("editor"))):
     a = _get_asset_or_404(uuid)
     with transaction() as conn:
-        conn.execute("UPDATE assets SET status = 'deleted', updated_at = ? WHERE id = ?",
-                     (now_iso(), a["id"]))
+        conn.execute("UPDATE assets SET status = ?, updated_at = ? WHERE id = ?",
+                     (AssetStatus.DELETED.value, now_iso(), a["id"]))
     log("asset.delete", user=user, target_type="asset", target_id=uuid, ip=client_ip(request))
     return {"ok": True}
 
@@ -602,9 +604,15 @@ def public_share_file(token: str, request: Request):
 def stats(user: dict = Depends(require_user)):
     conn = get_conn()
     by_type = {r["media_type"]: r["c"] for r in conn.execute(
-        "SELECT media_type, COUNT(*) c FROM assets WHERE status='active' GROUP BY media_type")}
-    total = conn.execute("SELECT COUNT(*) c FROM assets WHERE status='active'").fetchone()["c"]
-    size = conn.execute("SELECT COALESCE(SUM(size),0) s FROM assets WHERE status='active'").fetchone()["s"]
+        "SELECT media_type, COUNT(*) c FROM assets WHERE status = ? GROUP BY media_type",
+        (AssetStatus.ACTIVE.value,),
+    )}
+    total = conn.execute(
+        "SELECT COUNT(*) c FROM assets WHERE status = ?", (AssetStatus.ACTIVE.value,)
+    ).fetchone()["c"]
+    size = conn.execute(
+        "SELECT COALESCE(SUM(size),0) s FROM assets WHERE status = ?", (AssetStatus.ACTIVE.value,)
+    ).fetchone()["s"]
     tags = conn.execute("SELECT COUNT(*) c FROM tags").fetchone()["c"]
     cols = conn.execute("SELECT COUNT(*) c FROM collections").fetchone()["c"]
     # storage saved through dedup: bytes that would exist without content-addressing

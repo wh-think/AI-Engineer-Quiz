@@ -17,6 +17,7 @@ from . import ai, metadata, ocr, storage, thumbnails
 from .audit import now_iso
 from .config import config
 from .db import get_conn, transaction
+from .enums import AssetStatus
 
 
 def _set_tags(conn, asset_id: int, tags: list[tuple[str, float]], source: str) -> None:
@@ -130,7 +131,7 @@ def ingest_stream(
                 asset_uuid, sha, filename, filename, meta["mime"], meta["media_type"], ext,
                 size, meta["width"], meta["height"], meta["duration"],
                 title or desc.get("title") or filename,
-                desc.get("description"), None, "active",
+                desc.get("description"), None, AssetStatus.ACTIVE.value,
                 key, thumb_key, desc.get("creator"),
                 ", ".join(desc["keywords"]) if isinstance(desc.get("keywords"), list) else desc.get("keywords"),
                 desc.get("publisher"), desc.get("date"),

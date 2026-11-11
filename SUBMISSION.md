@@ -5,7 +5,8 @@
 - Fork: https://github.com/wh-think/AI-Engineer-Quiz
 - Branch: `codex/quiz-search-export`
 - Base: `3aa137c` (`main` when the work started)
-- Final commit SHA: recorded in the implementation handoff after the final commit; this file is intentionally not self-referential.
+- Final commit SHA: the branch HEAD reported in the submission email. The SHA is
+  not embedded here so that this document can remain part of the final commit.
 
 The upstream and quiz history are preserved. Work is split into logical commits:
 
@@ -13,6 +14,12 @@ The upstream and quiz history are preserved. Work is split into logical commits:
 - `84b8991` filter controls, pagination, and browser download
 - `cd556bf` reproducible acceptance data
 - `ebb4a27` batched tag lookup for exports
+- `7347431` submission notes and changelog
+- `661231f` page-only pagination parameters
+- `39af266` typed search and asset-state enums
+- `f6f1ead` POST encoding for JSON requests and explicit button types
+- The accurate final SHA is the branch HEAD at review time; report it in the
+  submission email.
 
 ## Run and verify
 
@@ -24,13 +31,16 @@ export KEEPSTACK_AI_ENABLED=false
 export KEEPSTACK_OCR_ENABLED=false
 export KEEPSTACK_DATA_DIR=/tmp/keepstack-quiz
 
+uv run --no-sync python -m keepstack seed
 uv run --no-sync python -m keepstack quiz-seed
 uv run --no-sync python -m keepstack
 ```
 
 Open <http://localhost:8000> and sign in with `admin` / `admin`.
 
-The fixture is safe to run repeatedly. It creates 19 assets in `Harbor Campaign`:
+The regular seed creates 24 demo assets and three demo collections. The quiz
+fixture adds 19 assets in `Harbor Campaign`, for 41 active assets in total. The
+fixture is safe to run repeatedly. It creates 19 assets in `Harbor Campaign`:
 15 match the business filter and 14 of those are images. The 14 images share one
 `created_at`, so the second page exercises the stable `created_at, id` ordering
 tie-breaker. The fixture also includes an internal-tag exclusion, a missing
@@ -56,7 +66,7 @@ uv run --no-sync python -m pytest -q
 Local run on 2026-11-11:
 
 ```text
-30 passed, 2 skipped
+31 passed, 2 skipped
 ```
 
 The skipped tests require the optional local CLIP model and Tesseract binary.

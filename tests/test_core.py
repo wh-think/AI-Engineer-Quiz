@@ -594,6 +594,29 @@ def test_quiz_http_rejects_invalid_pagination_and_status_override(quiz_catalog):
     assert all(item["status"] == "active" for item in response.json()["items"])
 
 
+def test_quiz_blank_and_special_keywords(quiz_catalog):
+    baseline = search.search(
+        collection_id=quiz_catalog["target"], tags=["approved", "campaign"],
+        exclude_tags=["internal"], limit=100,
+    )
+    for query in ("", "   ", "\t\n"):
+        result = search.search(
+            q=query, collection_id=quiz_catalog["target"],
+            tags=["approved", "campaign"], exclude_tags=["internal"], limit=100,
+        )
+        assert result["total"] == baseline["total"]
+
+    for query in ('"harbor"', "harbor -- campaign", "harbor[]{}"):
+        result = search.search(q=query, limit=100)
+        assert result["total"] >= 1
+        assert all(item["status"] == "active" for item in result["items"])
+
+    for query in ("harbor OR", "#$%^&*()"):
+        result = search.search(q=query, limit=100)
+        assert result["total"] >= 0
+        assert all(item["status"] == "active" for item in result["items"])
+
+
 def test_quiz_mutations_are_visible_in_search_and_export(quiz_catalog):
     import csv
     from fastapi.testclient import TestClient

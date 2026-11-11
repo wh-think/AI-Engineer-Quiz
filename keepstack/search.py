@@ -220,6 +220,23 @@ def iter_export_rows(
         return
 
     conn = get_conn()
+    matched = conn.execute(
+        f"SELECT a.id {query.sql}", query.params
+    ).fetchall()
+    asset_ids = [row["id"] for row in matched]
+    tags_by_asset: dict[int, list[str]] = {asset_id: [] for asset_id in asset_ids}
+    for start in range(0, len(asset_ids), 500):
+        chunk = asset_ids[start:start + 500]
+        placeholders = ", ".join("?" for _ in chunk)
+        tag_rows = conn.execute(
+            f"SELECT at.asset_id, t.name FROM asset_tags at "
+            f"JOIN tags t ON t.id = at.tag_id WHERE at.asset_id IN ({placeholders}) "
+            "ORDER BY t.name",
+            chunk,
+        ).fetchall()
+        for row in tag_rows:
+            tags_by_asset[row["asset_id"]].append(row["name"])
+
     cursor = conn.execute(f"SELECT a.* {query.sql} ORDER BY {query.order_sql}", query.params)
     while True:
         rows = cursor.fetchmany(batch_size)
@@ -227,18 +244,13 @@ def iter_export_rows(
             break
         for row in rows:
             asset = dict(row)
-            tag_rows = conn.execute(
-                "SELECT t.name FROM tags t JOIN asset_tags at ON at.tag_id = t.id "
-                "WHERE at.asset_id = ? ORDER BY t.name",
-                (asset["id"],),
-            ).fetchall()
             yield {
                 "uuid": asset["uuid"],
                 "title": asset["title"] or "",
                 "description": asset["description"] or "",
                 "filename": asset["filename"] or "",
                 "media_type": asset["media_type"] or "",
-                "tags": [r["name"] for r in tag_rows],
+                "tags": tags_by_asset[asset["id"]],
                 "created_at": asset["created_at"] or "",
             }
 

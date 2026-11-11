@@ -114,10 +114,12 @@ function wireTagInput(selector, side) {
 wireTagInput("#filter-include", "include");
 wireTagInput("#filter-exclude", "exclude");
 
-function filterParams() {
-  const p = new URLSearchParams({
-    q: state.q, sort: state.sort, limit: String(state.pageSize), offset: String(state.offset),
-  });
+function filterParams({ paged = true } = {}) {
+  const p = new URLSearchParams({ q: state.q, sort: state.sort });
+  if (paged) {
+    p.set("limit", String(state.pageSize));
+    p.set("offset", String(state.offset));
+  }
   if (state.media) p.set("media_type", state.media);
   if (state.collection) p.set("collection_id", state.collection);
   state.includeTags.forEach(tag => p.append("tag", tag));
@@ -224,7 +226,8 @@ function renderFacets(facets) {
   }));
   $$("#facet-tags li").forEach(li => li.addEventListener("click", () => {
     const tag = li.dataset.tag; const idx = state.includeTags.indexOf(tag);
-    if (idx >= 0) state.includeTags.splice(idx, 1); else addTag("include", tag);
+    if (idx >= 0) state.includeTags.splice(idx, 1);
+    else if (!state.includeTags.includes(tag)) state.includeTags.push(tag);
     state.offset = 0; renderFilterChips(); loadLibrary();
   }));
 }
@@ -234,7 +237,7 @@ async function exportCsv() {
   const button = $("#btn-export");
   button.disabled = true; button.textContent = "Exporting...";
   try {
-    const response = await fetch("/api/assets/export.csv?" + filterParams().toString(), {
+    const response = await fetch("/api/assets/export.csv?" + filterParams({ paged: false }).toString(), {
       headers: { Authorization: "Bearer " + state.token },
     });
     if (response.status === 401) { logout(); throw new Error("Your session expired."); }

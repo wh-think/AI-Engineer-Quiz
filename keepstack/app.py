@@ -6,16 +6,18 @@ single-page web client is served from the ``web/`` directory at the root.
 """
 from __future__ import annotations
 
+import csv
 import io
 import ipaddress
 import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import (Body, Depends, FastAPI, File, Form, HTTPException, Query,
                      Request, UploadFile)
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
-                               PlainTextResponse, Response)
+                               PlainTextResponse, Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, ingest, search, standards, storage, thumbnails
@@ -177,17 +179,67 @@ async def upload_assets(
 def list_assets(
     q: str = "",
     media_type: Optional[str] = None,
-    tag: Optional[str] = None,
+    tag: Optional[list[str]] = Query(None),
+    exclude_tag: Optional[list[str]] = Query(None),
     collection_id: Optional[int] = None,
-    status: str = "active",
-    sort: str = "newest",
+    sort: Literal["newest", "oldest", "name", "largest"] = "newest",
     mode: str = "keyword",
-    limit: int = Query(60, le=200),
-    offset: int = 0,
+    limit: int = Query(60, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     user: dict = Depends(require_user),
 ):
-    return search.search(q=q, media_type=media_type, tag=tag, collection_id=collection_id,
-                         status=status, sort=sort, mode=mode, limit=limit, offset=offset)
+    return search.search(
+        q=q,
+        media_type=media_type,
+        tags=tag,
+        exclude_tags=exclude_tag,
+        collection_id=collection_id,
+        sort=sort,
+        mode=mode,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/assets/export.csv")
+def export_assets_csv(
+    q: str = "",
+    media_type: Optional[str] = None,
+    tag: Optional[list[str]] = Query(None),
+    exclude_tag: Optional[list[str]] = Query(None),
+    collection_id: Optional[int] = None,
+    sort: Literal["newest", "oldest", "name", "largest"] = "newest",
+    user: dict = Depends(require_user),
+):
+    fields = ["uuid", "title", "description", "filename", "media_type", "tags", "created_at"]
+
+    def rows():
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\r\n")
+        writer.writeheader()
+        yield "\ufeff" + buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        for row in search.iter_export_rows(
+            q=q,
+            media_type=media_type,
+            tags=tag,
+            exclude_tags=exclude_tag,
+            collection_id=collection_id,
+            sort=sort,
+        ):
+            row["tags"] = json.dumps(row["tags"], ensure_ascii=False)
+            writer.writerow(row)
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    headers = {
+        "Content-Disposition": f'attachment; filename="keepstack-assets-{stamp}.csv"',
+        "Cache-Control": "no-store",
+    }
+    return StreamingResponse(rows(), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 def _get_asset_or_404(uuid: str) -> dict:

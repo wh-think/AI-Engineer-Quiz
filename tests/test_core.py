@@ -369,3 +369,246 @@ def test_version_endpoint_reports_name_and_version():
     payload = version()
     assert payload["name"] == "keepstack"
     assert payload["version"]
+
+
+# ---------------------------------------------------------------------------
+# Quiz acceptance: combined filtering, stable pagination, and CSV export
+# ---------------------------------------------------------------------------
+def _quiz_asset(filename, *, title="", description="", media_type="image", created_at=None,
+                tags=(), collection=None, status="active"):
+    buf = io.BytesIO()
+    Image.new("RGB", (100, 70), (70, 100, 150)).save(
+        buf, format="JPEG", comment=f"quiz fixture: {filename}".encode("utf-8")
+    )
+    data = buf.getvalue()
+    asset = ingest.ingest_stream(io.BytesIO(data), filename, run_ai=False, title=title)
+    conn = get_conn()
+    conn.execute(
+        "UPDATE assets SET description = ?, media_type = ?, status = ?, created_at = ? WHERE id = ?",
+        (description, media_type, status, created_at or asset["created_at"], asset["id"]),
+    )
+    for name in tags:
+        conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (name.lower(),))
+        tag_id = conn.execute("SELECT id FROM tags WHERE name = ?", (name.lower(),)).fetchone()["id"]
+        conn.execute("INSERT OR IGNORE INTO asset_tags (asset_id, tag_id, source) VALUES (?,?, 'manual')",
+                     (asset["id"], tag_id))
+    if collection is not None:
+        conn.execute("INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at) "
+                     "VALUES (?,?, ?)", (collection, asset["id"], created_at or asset["created_at"]))
+    conn.commit()
+    ingest.reindex_fts(asset["id"])
+    return dict(conn.execute("SELECT * FROM assets WHERE id = ?", (asset["id"],)).fetchone())
+
+
+@pytest.fixture()
+def quiz_catalog():
+    conn = get_conn()
+    conn.execute("DELETE FROM collection_assets")
+    conn.execute("DELETE FROM asset_tags")
+    conn.execute("DELETE FROM collections")
+    conn.execute("DELETE FROM asset_fts")
+    conn.execute("DELETE FROM assets")
+    conn.execute("DELETE FROM tags")
+    conn.commit()
+    admin = conn.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
+    if not admin:
+        conn.execute(
+            "INSERT INTO users (username, email, full_name, password_hash, role, is_active, created_at) "
+            "VALUES ('admin', 'admin@example.org', 'Administrator', ?, 'admin', 1, ?)",
+            (hash_password("admin"), "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        admin = conn.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
+    conn.execute("INSERT INTO collections (uuid, name, created_at) VALUES ('quiz-target', 'Harbor Campaign', '2026-01-01T00:00:00Z')")
+    conn.execute("INSERT INTO collections (uuid, name, created_at) VALUES ('quiz-other', 'Other', '2026-01-01T00:00:00Z')")
+    target = conn.execute("SELECT id FROM collections WHERE uuid='quiz-target'").fetchone()["id"]
+    other = conn.execute("SELECT id FROM collections WHERE uuid='quiz-other'").fetchone()["id"]
+    conn.commit()
+
+    base = "2026-08-01T12:00:00+00:00"
+    assets = []
+    for i in range(15):
+        assets.append(_quiz_asset(
+            f"quiz-target-{i:02d}.jpg",
+            title=f"Harbor approved campaign {i:02d}",
+            description='target, with "quotes"\nand a newline', created_at=base,
+            tags=["approved", "campaign", "extra"], collection=target,
+        ))
+    assets.append(_quiz_asset("quiz-internal.jpg", title="Harbor internal",
+                              created_at="2026-08-02T12:00:00+00:00",
+                              tags=["approved", "campaign", "internal"], collection=target))
+    assets.append(_quiz_asset("quiz-missing.jpg", title="Harbor missing campaign",
+                              created_at="2026-08-03T12:00:00+00:00",
+                              tags=["approved"], collection=target))
+    assets.append(_quiz_asset("quiz-other-collection.jpg", title="Harbor elsewhere",
+                              created_at="2026-08-04T12:00:00+00:00",
+                              tags=["approved", "campaign"], collection=other))
+    assets.append(_quiz_asset("quiz-deleted.jpg", title="Harbor deleted",
+                              created_at="2026-08-05T12:00:00+00:00",
+                              tags=["approved", "campaign"], collection=target, status="deleted"))
+    assets.append(_quiz_asset("quiz-document.txt", title="Harbor Chinese 中文",
+                              description="中文，含逗号与引号 \"测试\"", media_type="document",
+                              created_at="2026-08-06T12:00:00+00:00",
+                              tags=["approved", "campaign"], collection=target))
+    assets.append(_quiz_asset("quiz-other-media.txt", title="Harbor Other Media",
+                              media_type="document", created_at="2026-08-07T12:00:00+00:00",
+                              tags=["approved", "campaign"], collection=target))
+    return {"target": target, "other": other, "assets": assets, "admin": dict(admin)}
+
+
+def _quiz_ids(result):
+    return [item["id"] for item in result["items"]]
+
+
+def test_quiz_combined_filter_and_tag_semantics(quiz_catalog):
+    result = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                           tags=["approved", "campaign"], exclude_tags=["internal"],
+                           limit=100)
+    assert result["total"] == 17
+    assert len(result["items"]) == 17
+    assert all(item["status"] == "active" for item in result["items"])
+
+    images = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                           tags=["approved", "campaign"], exclude_tags=["internal"],
+                           media_type="image", limit=100)
+    assert images["total"] == 15
+    assert all(item["media_type"] == "image" for item in images["items"])
+
+    duplicate_tags = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                                   tags=["approved", "approved", " campaign "],
+                                   exclude_tags=["internal", "internal"], limit=100)
+    assert duplicate_tags["total"] == result["total"]
+
+    conflict = search.search(q="harbor", tags=["approved"], exclude_tags=["APPROVED"])
+    assert conflict["total"] == 0 and conflict["items"] == []
+
+
+def test_quiz_keyword_sort_is_stable_across_pages(quiz_catalog):
+    page1 = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                          tags=["approved", "campaign"], exclude_tags=["internal"],
+                          sort="oldest", limit=6, offset=0)
+    page2 = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                          tags=["approved", "campaign"], exclude_tags=["internal"],
+                          sort="oldest", limit=6, offset=6)
+    page3 = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                          tags=["approved", "campaign"], exclude_tags=["internal"],
+                          sort="oldest", limit=6, offset=12)
+    ids = _quiz_ids(page1) + _quiz_ids(page2) + _quiz_ids(page3)
+    assert len(ids) == 17 and len(set(ids)) == 17
+    assert page1["total"] == page2["total"] == 17
+    expected = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                             tags=["approved", "campaign"], exclude_tags=["internal"],
+                             sort="oldest", limit=100)["items"]
+    assert ids == [item["id"] for item in expected]
+
+    newest = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                           tags=["approved", "campaign"], exclude_tags=["internal"],
+                           sort="newest", limit=100)["items"]
+    assert newest[0]["title"] == "Harbor Other Media"
+    assert newest[1]["title"].endswith("中文")
+    assert newest[-1]["created_at"] == "2026-08-01T12:00:00+00:00"
+
+
+def test_quiz_export_matches_all_filtered_rows(quiz_catalog):
+    import csv
+    from fastapi.testclient import TestClient
+    from keepstack.app import app
+
+    client = TestClient(app)
+    token = make_token(quiz_catalog["admin"]["id"], quiz_catalog["admin"]["role"])
+    params = [
+        ("q", "harbor"), ("collection_id", str(quiz_catalog["target"])),
+        ("tag", "approved"), ("tag", "campaign"),
+        ("exclude_tag", "internal"), ("sort", "oldest"),
+        ("limit", "1"), ("offset", "100"),
+    ]
+    response = client.get("/api/assets/export.csv", params=params,
+                          headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    reader = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig")))
+    rows = list(reader)
+    assert list(reader.fieldnames) == ["uuid", "title", "description", "filename",
+                                       "media_type", "tags", "created_at"]
+    assert len(rows) == 17
+    expected = search.search(q="harbor", collection_id=quiz_catalog["target"],
+                             tags=["approved", "campaign"], exclude_tags=["internal"],
+                             sort="oldest", limit=100)["items"]
+    assert [row["uuid"] for row in rows] == [item["uuid"] for item in expected]
+    newline = next(row for row in rows if "newline" in row["description"])
+    assert 'target, with "quotes"\nand a newline' == newline["description"]
+    chinese = next(row for row in rows if "中文" in row["title"])
+    assert "中文" in chinese["title"]
+    assert "中文，含逗号" in chinese["description"]
+    assert '"测试"' in chinese["description"]
+    assert json.loads(chinese["tags"]) == ["approved", "campaign"]
+
+
+def test_quiz_export_empty_headers_and_auth(quiz_catalog):
+    import csv
+    from fastapi.testclient import TestClient
+    from keepstack.app import app
+
+    client = TestClient(app)
+    assert client.get("/api/assets/export.csv").status_code == 401
+    token = make_token(quiz_catalog["admin"]["id"], quiz_catalog["admin"]["role"])
+    response = client.get("/api/assets/export.csv", params={"q": "definitely-not-present"},
+                          headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    assert rows == []
+    assert response.content.decode("utf-8-sig").splitlines()[0] == \
+        "uuid,title,description,filename,media_type,tags,created_at"
+
+
+def test_quiz_http_rejects_invalid_pagination_and_status_override(quiz_catalog):
+    from fastapi.testclient import TestClient
+    from keepstack.app import app
+
+    client = TestClient(app)
+    token = make_token(quiz_catalog["admin"]["id"], quiz_catalog["admin"]["role"])
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/assets", params={"limit": 0}, headers=headers).status_code == 422
+    assert client.get("/api/assets", params={"limit": 101}, headers=headers).status_code == 422
+    assert client.get("/api/assets", params={"offset": -1}, headers=headers).status_code == 422
+    assert client.get("/api/assets", params={"sort": "unsupported"}, headers=headers).status_code == 422
+    response = client.get("/api/assets", params={"status": "deleted"}, headers=headers)
+    assert response.status_code == 200
+    assert all(item["status"] == "active" for item in response.json()["items"])
+
+
+def test_quiz_mutations_are_visible_in_search_and_export(quiz_catalog):
+    import csv
+    from fastapi.testclient import TestClient
+    from keepstack.app import app
+    from keepstack.config import config
+    from keepstack.auth import reset_login_throttle
+
+    reset_login_throttle()
+    client = TestClient(app)
+    user = quiz_catalog["admin"]
+    token = make_token(user["id"], user["role"])
+    headers = {"Authorization": f"Bearer {token}"}
+    asset = quiz_catalog["assets"][0]
+
+    assert client.patch(f"/api/assets/{asset['uuid']}", json={
+        "title": "Harbor Updated Title", "description": "Updated 中文 description",
+    }, headers=headers).status_code == 200
+    updated = client.get("/api/assets", params={"q": "updated"}, headers=headers).json()
+    assert updated["total"] == 1 and updated["items"][0]["uuid"] == asset["uuid"]
+
+    assert client.post(f"/api/assets/{asset['uuid']}/tags", json={"name": "new-tag"},
+                       headers=headers).status_code == 200
+    with_tag = client.get("/api/assets", params={"tag": "new-tag"}, headers=headers).json()
+    assert with_tag["total"] == 1
+    assert client.delete(f"/api/assets/{asset['uuid']}/tags/new-tag", headers=headers).status_code == 200
+    without_tag = client.get("/api/assets", params={"tag": "new-tag"}, headers=headers).json()
+    assert without_tag["total"] == 0
+
+    export = client.get("/api/assets/export.csv", params={"q": "updated"}, headers=headers)
+    rows = list(csv.DictReader(io.StringIO(export.content.decode("utf-8-sig"))))
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Harbor Updated Title"
+    assert rows[0]["description"] == "Updated 中文 description"

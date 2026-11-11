@@ -8,6 +8,13 @@ semantic versioning.
 
 ### Added
 
+- Combined active-asset filtering by keyword, collection, media type, multiple
+  required tags, and multiple excluded tags. Lists and exports share one query,
+  with stable creation-time ordering and 12-row pagination in the web client.
+- `GET /api/assets/export.csv` for an authenticated, UTF-8-BOM CSV export of all
+  matching assets. Tags are a sorted JSON array in each row.
+- `python -m keepstack quiz-seed` for deterministic, idempotent acceptance data.
+
 - Parse common XMP RDF fields into structured metadata, catalog fields, and
   full-text search.
 - OCR images at ingest through the Tesseract binary when it is installed, so

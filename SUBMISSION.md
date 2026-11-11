@@ -103,6 +103,18 @@ newlines; zero matches still produce the header.
 
 ## Tradeoffs and limits
 
+- No new runtime dependency or database schema was added. The shared SQL query
+  builder removes list/export drift and fixes the former JOIN parameter-order
+  bug; its cost is a small amount of query-construction indirection.
+- `GET /api/filter-options` fills collection, media, and tag suggestions without
+  replacing the existing global facets. The benefit is complete filter inputs;
+  the cost is one small authenticated metadata request when the library opens.
+- The browser keeps filter state locally and uses AbortController plus a request
+  sequence guard so stale responses cannot overwrite the latest conditions. The
+  cost is modest client state management, with no new framework or build step.
+- `quiz-seed` is an isolated, idempotent acceptance fixture. It makes review
+  reproducible without changing the normal demo seed; the cost is one extra
+  optional CLI path and fixture maintenance.
 - Search reuses the existing FTS fields and tokenizer. Keyword query cleaning now
   treats input with no searchable terms as no keyword restriction.
 - List and export share one SQL builder, named parameters, and stable ordering.

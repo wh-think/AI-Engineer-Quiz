@@ -627,3 +627,29 @@ def test_quiz_mutations_are_visible_in_search_and_export(quiz_catalog):
     assert len(rows) == 1
     assert rows[0]["title"] == "Harbor Updated Title"
     assert rows[0]["description"] == "Updated 中文 description"
+
+
+def test_quiz_seed_is_repeatable_and_builds_expected_fixture(quiz_catalog):
+    from keepstack.quiz_seed import COLLECTION_NAME, COLLECTION_UUID, run_quiz_seed
+
+    run_quiz_seed()
+    first_assets = get_conn().execute("SELECT COUNT(*) c FROM assets").fetchone()["c"]
+    run_quiz_seed()
+    conn = get_conn()
+    assert conn.execute("SELECT COUNT(*) c FROM assets").fetchone()["c"] == first_assets
+    collection = conn.execute(
+        "SELECT id, name FROM collections WHERE uuid = ?", (COLLECTION_UUID,)
+    ).fetchone()
+    assert collection is not None
+    assert collection["name"] == COLLECTION_NAME
+    result = search.search(
+        q="harbor", collection_id=collection["id"], tags=["approved", "campaign"],
+        exclude_tags=["internal"], media_type="image", limit=100,
+    )
+    assert result["total"] == 14
+    document = search.search(
+        q="harbor", collection_id=collection["id"], tags=["approved", "campaign"],
+        exclude_tags=["internal"], media_type="document", limit=100,
+    )
+    assert document["total"] == 1
+    assert document["items"][0]["title"] == "Harbor 中文 campaign document"
